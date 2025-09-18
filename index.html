@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Leitor QR – Unimed (campos mapeados)</title>
+<style>
+  :root{--accent:#6a1b9a;--ink:#1f2937;--muted:#6b7280;--bg:#f8fafc}
+  body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Arial;background:var(--bg);color:var(--ink)}
+  header{padding:14px 16px;background:#fff;border-bottom:1px solid #e5e7eb;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  header h1{font-size:18px;margin:0}
+  .wrap{max-width:1100px;margin:20px auto;padding:0 14px;display:grid;gap:16px;grid-template-columns:1fr 1fr}
+  @media (max-width:900px){.wrap{grid-template-columns:1fr}}
+  .card{background:#fff;border:1px solid #e5e7eb;border-radius:12px}
+  .card h2{font-size:16px;margin:0;padding:12px 14px;border-bottom:1px solid #f1f5f9}
+  .card .content{padding:12px 14px}
+  button{appearance:none;border:0;border-radius:10px;padding:10px 12px;background:var(--accent);color:#fff;font-weight:600;cursor:pointer}
+  button.secondary{background:#1118270f;color:#111827;border:1px solid #e5e7eb}
+  button:disabled{opacity:.6;cursor:not-allowed}
+  .row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .hint{color:var(--muted);font-size:13px}
+  video,canvas{width:100%;max-height:360px;background:#000;border-radius:10px}
+  .kv{display:grid;grid-template-columns:220px 1fr;gap:10px}
+  .copybox{display:inline-flex;align-items:center;gap:8px;background:#0f172a;color:#e5e7eb;padding:8px 10px;border-radius:10px}
+  input[type="file"]{display:none}
+  .field{display:flex;flex-direction:column;gap:6px;margin-bottom:8px}
+  .field input{width:100%;padding:8px;border:1px solid #e5e7eb;border-radius:8px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Leitor QR – Unimed</h1>
+  <div class="row">
+    <label class="row" style="background:#f1f5f9;padding:8px 10px;border-radius:999px">
+      <span>Câmera</span>
+      <select id="cameraSelect"></select>
+    </label>
+    <button id="btnStart">Abrir câmera</button>
+    <button id="btnStop" class="secondary" disabled>Parar</button>
+    <label class="row" for="fileInput" style="background:#f1f5f9;padding:8px 10px;border-radius:999px">Usar imagem</label>
+    <input id="fileInput" type="file" accept="image/*">
+  </div>
+</header>
+
+<div class="wrap">
+  <section class="card">
+    <h2>Scanner</h2>
+    <div class="content">
+      <video id="video" playsinline></video>
+      <canvas id="canvas" hidden></canvas>
+      <p id="status" class="hint">Pronto para iniciar a leitura.</p>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Dados extraídos</h2>
+    <div class="content">
+      <div class="field">
+        <label>Texto bruto do QRCode</label>
+        <input id="rawText" readonly>
+      </div>
+      <div class="kv">
+        <div>Nome</div><div id="nome">—</div>
+        <div>Sexo</div><div id="sexo">—</div>
+        <div>Data de nascimento</div><div id="nascimento">—</div>
+        <div>Carteirinha Unimed</div><div id="carteirinha">—</div>
+        <div>CNS</div><div id="cns">—</div>
+        <div>Validade</div><div id="validade">—</div>
+        <div>Rede de atendimento</div><div id="rede">—</div>
+        <div>Produto ANS</div><div id="ans">—</div>
+        <div>Token</div>
+        <div class="row">
+          <div id="tokenBox" class="copybox">??????????</div>
+          <button id="btnCopy" class="secondary">Copiar</button>
+          <span id="copyHint" class="hint"></span>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+<script>
+(() => {
+  const video = document.getElementById('video');
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+  const btnStart = document.getElementById('btnStart');
+  const btnStop  = document.getElementById('btnStop');
+  const statusEl = document.getElementById('status');
+  const cameraSelect = document.getElementById('cameraSelect');
+  const fileInput = document.getElementById('fileInput');
+
+  const out = {
+    raw: document.getElementById('rawText'),
+    nome: document.getElementById('nome'),
+    sexo: document.getElementById('sexo'),
+    nasc: document.getElementById('nascimento'),
+    cart: document.getElementById('carteirinha'),
+    cns:  document.getElementById('cns'),
+    val:  document.getElementById('validade'),
+    rede: document.getElementById('rede'),
+    ans:  document.getElementById('ans'),
+    tokenBox: document.getElementById('tokenBox'),
+    btnCopy: document.getElementById('btnCopy'),
+    copyHint: document.getElementById('copyHint'),
+  };
+
+  let stream = null, rafId = null, scanning = false;
+
+  async function listCameras(){
+    try{
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      cameraSelect.innerHTML = '';
+      devices.filter(d=>d.kind==='videoinput').forEach((cam,i)=>{
+        const o=document.createElement('option');
+        o.value = cam.deviceId;
+        o.textContent = cam.label || `Câmera ${i+1}`;
+        cameraSelect.appendChild(o);
+      });
+    }catch(e){}
+  }
+
+  async function start(){
+    try{
+      await stop();
+      statusEl.textContent = 'Solicitando acesso à câmera...';
+      const deviceId = cameraSelect.value || undefined;
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: deviceId ? {deviceId:{exact:deviceId}} : {facingMode:'environment'}
+      });
+      video.srcObject = stream;
+      await video.play();
+      btnStop.disabled = false;
+      btnStart.disabled = true;
+      scanning = true;
+      statusEl.textContent = 'Lendo... aproxime o QRCode.';
+      tick();
+    }catch(e){
+      statusEl.textContent = 'Erro ao acessar câmera: ' + e.message;
+    }
+  }
+
+  async function stop(){
+    scanning = false;
+    if (rafId) cancelAnimationFrame(rafId);
+    if (stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; }
+    btnStop.disabled = true;
+    btnStart.disabled = false;
+  }
+
+  function tick(){
+    if (!scanning) return;
+    if (video.readyState === video.HAVE_ENOUGH_DATA){
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const code = jsQR(imageData.data, imageData.width, imageData.height, {inversionAttempts:'dontInvert'});
+      if (code && code.data){
+        onDecoded(code.data.trim());
+        stop();
+        return;
+      }
+    }
+    rafId = requestAnimationFrame(tick);
+  }
+
+  function onDecoded(text){
+    statusEl.textContent = 'QR decodificado com sucesso.';
+    out.raw.value = text;
+
+    // Split em 12 posições preservando ordem (sem remover vazios)
+    const parts = text.split('=').map(s => s.replace(/\s+/g,' ').trim());
+    while (parts.length < 12) parts.push('');
+
+    // Mapeamento por índice fixo
+    const carteirinha = parts[2] || '';
+    const nome        = parts[3] || '';
+    const nascimento  = parts[4] || '';
+    const sexo        = parts[5] || '';
+    const cns         = parts[6] || '';
+    const validade    = parts[7] || '';
+    const rede        = parts[8] || '';
+    const ans         = parts[9] || '';
+    let token         = (parts[11] || '').replace(/\s+/g,'');
+
+    if (token.length !== 10) token = text.replace(/\s+/g,'').slice(-10);
+
+    // Exibir
+    out.nome.textContent = nome || '—';
+    out.sexo.textContent = sexo || '—';
+    out.nasc.textContent = nascimento || '—';
+    out.cart.textContent = carteirinha || '—';
+    out.cns.textContent = cns || '—';
+    out.val.textContent = validade || '—';
+    out.rede.textContent = rede || '—';
+    out.ans.textContent = ans || '—';
+    out.tokenBox.textContent = token;
+
+    //copyToClipboard(token);
+  }
+
+  async function copyToClipboard(text){
+    try{
+      await navigator.clipboard.writeText(text);
+      out.copyHint.textContent = 'Token copiado!';
+      setTimeout(()=>out.copyHint.textContent='', 2000);
+    }catch(e){
+      out.copyHint.textContent = 'Não foi possível copiar automaticamente.';
+    }
+  }
+
+  document.getElementById('btnStart').addEventListener('click', start);
+  document.getElementById('btnStop').addEventListener('click', stop);
+  out.btnCopy.addEventListener('click', ()=> copyToClipboard(out.tokenBox.textContent));
+
+  document.getElementById('fileInput').addEventListener('change', ev=>{
+    const file = ev.target.files?.[0];
+    if (!file) return;
+    const img = new Image();
+    img.onload = function(){
+      const w = img.naturalWidth, h = img.naturalHeight;
+      canvas.width = w; canvas.height = h;
+      ctx.drawImage(img, 0, 0);
+      const imageData = ctx.getImageData(0, 0, w, h);
+      const code = jsQR(imageData.data, imageData.width, imageData.height);
+      if (code && code.data) onDecoded(code.data.trim());
+      else statusEl.textContent = 'Não foi possível decodificar a imagem.';
+    };
+    img.src = URL.createObjectURL(file);
+  });
+
+  if (navigator.mediaDevices?.getUserMedia){
+    navigator.mediaDevices.getUserMedia({video:true})
+      .then(s=>{s.getTracks().forEach(t=>t.stop()); return listCameras();})
+      .catch(()=>listCameras());
+  }
+})();
+</script>
+</body>
+</html>
