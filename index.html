@@ -187,6 +187,11 @@
 
     if (token.length !== 10) token = text.replace(/\s+/g,'').slice(-10);
 
+    // Validação se o token é numérico
+    if (!/^\d+$/.test(token)) {
+        token = 'Inválido';
+    }
+    
     // Exibir
     out.nome.textContent = nome || '—';
     out.sexo.textContent = sexo || '—';
