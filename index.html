@@ -222,9 +222,15 @@
       const hoje = new Date();
       const [diaNasc, mesNasc, anoNasc] = nascimento.split('/').map(Number);
       if (diaNasc === hoje.getDate() && mesNasc === (hoje.getMonth() + 1)) {
-        alert('Aniversariante do dia!');
+        let pronome = '';
+        if (sexo === 'M') {
+          pronome = ' o ';
+        } else if (sexo === 'F') {
+          pronome = ' a ';
+        }
+        alert('Aniversariante do dia!\nParabenize' + pronome + nome + '!');
       }
-    }    
+    } 
     
     //copyToClipboard(token);
   }
