@@ -124,6 +124,20 @@
   async function start(){
     try{
       await stop();
+
+      // Limpar formulário
+      out.raw.value = "";
+      out.nome.textContent = "—";
+      out.sexo.textContent = "—";
+      out.nasc.textContent = "—";
+      out.cart.textContent = "—";
+      out.cns.textContent = "—";
+      out.val.textContent = "—";
+      out.rede.textContent = "—";
+      out.ans.textContent = "—";
+      out.tokenBox.textContent = "??????????";
+      out.copyHint.textContent = "";
+      
       statusEl.textContent = 'Solicitando acesso à câmera...';
       const deviceId = cameraSelect.value || undefined;
       stream = await navigator.mediaDevices.getUserMedia({
@@ -203,6 +217,15 @@
     out.ans.textContent = ans || '—';
     out.tokenBox.textContent = token;
 
+    // Verificar aniversário
+    if (nascimento && nascimento !== '—') {
+      const hoje = new Date();
+      const [diaNasc, mesNasc, anoNasc] = nascimento.split('/').map(Number);
+      if (diaNasc === hoje.getDate() && mesNasc === (hoje.getMonth() + 1)) {
+        alert('Aniversariante do dia!');
+      }
+    }    
+    
     //copyToClipboard(token);
   }
 
